@@ -5,30 +5,31 @@ This script is intended to run on the server that already hosts NemoClaw and
 
 ## Automatically send logs from replay
 
-Run `log_backend` on the NemoClaw server and turn on **Auto-send critical logs** at
-the top of the Gradio dashboard. The adjacent status shows pending/retry counts.
+Run `log_backend` on the NemoClaw server. **Auto-send critical logs** is enabled by
+default at the top of the Gradio dashboard. The adjacent status shows total delivered,
+pending/retry counts, and the latest pending error.
 Turning it off waits for any current send and retains pending logs; turning it back
 on resumes delivery. The control affects all users of this server and resets to the
 startup flag on restart.
 
-Alternatively, enable automatic delivery at startup:
+Normal startup enables automatic delivery:
 
 ```bash
 cd log_backend
-./scripts/start_gradio.sh --auto-send-critical
+./scripts/start_gradio.sh
 ```
 
-Equivalent CLI: `.venv/bin/clawwatch-demo serve --config config/demo.toml --auto-send-critical`.
+Equivalent CLI: `.venv/bin/clawwatch-demo serve --config config/demo.toml`.
 Start a replay in the dashboard. Every newly emitted critical event is automatically
 queued and sent through the bundled `scripts/remote/send_critical_log.py`; no manual
 pipe or review card is required. The complete original JSON is passed through stdin.
-The normal startup without this flag leaves delivery disabled until the checkbox
-is turned on.
+Use `--no-auto-send-critical` to disable delivery at startup, for example when running
+locally. `--auto-send-critical` remains supported as an explicit enable flag.
 
 The server checks the queue every second, including while the browser is closed.
 Sending runs separately from replay and never holds a database write transaction.
 Failures remain queued and become eligible for retry after 30 seconds. Pending
-records resume when delivery is re-enabled, including at startup with the flag.
+records resume when delivery is re-enabled, including at normal startup.
 Successful deliveries are
 persisted and skipped on later checks. The dashboard displays pending/retry counts,
 and History records `critical_log_sent` and `critical_log_failed` events.
@@ -39,7 +40,10 @@ again creates a new event and a new alert. The existing review-card Slack notifi
 is separate and may also send an alert if you add a critical event to the review board.
 
 The defaults below apply to automatic delivery too. Set `NEMOCLAW_BIN` to an absolute
-executable path before starting the server if needed. No Slack bot token is required
+executable path before starting the server if needed. The sender also checks
+`~/.local/bin/nemoclaw` when the command is not on PATH, and includes `~/.local/bin`
+on the child process PATH. Recognized failures are reported with safe diagnostic
+messages; command output and log payloads are not printed. No Slack bot token is required
 by this delivery path; the existing NemoClaw/OpenClaw Slack configuration is used.
 Shutdown waits for the current send to finish (up to its timeout). A crash or timeout
 after Slack accepts a message but before delivery is recorded can cause a duplicate

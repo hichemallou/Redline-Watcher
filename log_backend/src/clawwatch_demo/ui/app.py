@@ -70,7 +70,7 @@ def create_app(
     config: AppConfig,
     *,
     recover: bool = True,
-    auto_send_critical: bool = False,
+    auto_send_critical: bool = True,
 ) -> tuple[gr.Blocks, DashboardRuntime]:
     recovered = recover_interrupted_runs(config.storage.database) if recover else ()
     controller = ReplayController(config.storage.database, auto_send_critical=auto_send_critical)
@@ -563,7 +563,7 @@ def create_app(
     )
 
 
-def launch_dashboard(config: AppConfig, *, auto_send_critical: bool = False) -> int:
+def launch_dashboard(config: AppConfig, *, auto_send_critical: bool = True) -> int:
     with application_lock(config.storage.database):
         demo, runtime = create_app(config, auto_send_critical=auto_send_critical)
         try:

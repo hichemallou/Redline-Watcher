@@ -48,10 +48,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     serve_parser = subparsers.add_parser("serve", help="launch the local Gradio dashboard")
     _add_config_argument(serve_parser)
-    serve_parser.add_argument(
+    delivery_options = serve_parser.add_mutually_exclusive_group()
+    delivery_options.add_argument(
         "--auto-send-critical",
         action="store_true",
-        help="automatically send critical replay logs; run only on the NemoClaw server",
+        default=True,
+        help="send critical replay logs automatically (default); run on the NemoClaw server",
+    )
+    delivery_options.add_argument(
+        "--no-auto-send-critical",
+        action="store_false",
+        dest="auto_send_critical",
+        help="disable automatic NemoClaw delivery, for example when running locally",
     )
 
     info_parser = subparsers.add_parser("db-info", help="show local database information")

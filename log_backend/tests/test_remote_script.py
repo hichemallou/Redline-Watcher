@@ -112,3 +112,41 @@ def test_failures_are_nonzero_without_leaking_output(remote_script, monkeypatch,
     output = capsys.readouterr()
     assert "secret" not in output.err
     assert output.out == ""
+
+
+def test_default_finds_user_local_executable(remote_script, tmp_path, monkeypatch):
+    monkeypatch.delenv("NEMOCLAW_BIN", raising=False)
+    monkeypatch.setattr(remote_script.shutil, "which", lambda name: None)
+    monkeypatch.setattr(remote_script.Path, "home", lambda: tmp_path)
+    executable = tmp_path / ".local/bin/nemoclaw"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\nexit 0\n")
+    executable.chmod(0o755)
+    assert remote_script.build_parser().parse_args([]).nemoclaw == str(executable)
+
+
+@pytest.mark.parametrize(
+    ("failure", "code"),
+    [
+        (FileNotFoundError("private path"), "executable_missing"),
+        (PermissionError("private path"), "permission_denied"),
+        (
+            SimpleNamespace(returncode=1, stdout="private", stderr="error: invalid_auth token"),
+            "slack_auth",
+        ),
+    ],
+)
+def test_structured_errors_report_only_safe_codes(
+    remote_script, monkeypatch, capsys, failure, code
+):
+    def fail(*args, **kwargs):
+        if isinstance(failure, Exception):
+            raise failure
+        return failure
+
+    monkeypatch.setattr(remote_script.subprocess, "run", fail)
+    monkeypatch.setattr("sys.stdin", io.StringIO('{"severity":"critical","message":"private"}'))
+    assert remote_script.main(["--result-json"]) == 1
+    output = capsys.readouterr()
+    assert json.loads(output.err) == {"ok": False, "error_code": code}
+    assert "private" not in output.err

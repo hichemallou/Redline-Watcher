@@ -92,7 +92,7 @@ def test_gradio_app_builds_with_packaged_css(tmp_path: Path) -> None:
     base = load_config(PROJECT_ROOT / "config/demo.toml")
     config = replace(base, storage=StorageConfig(database=database))
 
-    app, runtime = create_app(config, recover=False)
+    app, runtime = create_app(config, recover=False, auto_send_critical=False)
     try:
         serialized = app.get_config_file()
         assert serialized["title"] == "ClawWatch Log Lab"
@@ -126,7 +126,7 @@ def test_remote_dashboard_wires_automatic_delivery(tmp_path: Path) -> None:
     database = make_database(tmp_path, event_count=2)
     base = load_config(PROJECT_ROOT / "config/demo.toml")
     config = replace(base, storage=StorageConfig(database=database))
-    app, runtime = create_app(config, recover=False, auto_send_critical=True)
+    app, runtime = create_app(config, recover=False)
     try:
         assert runtime.controller.auto_send_critical is True
         assert runtime.critical_log_notifier is not None

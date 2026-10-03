@@ -118,20 +118,22 @@ Failures remain pending for the next check and appear in the board's Slack statu
 between Slack accepting a message and the local audit commit can still cause a duplicate.
 The button and script share `clawwatch_demo.review_slack.send_critical_reviews` directly.
 
-To send complete critical logs automatically as replay emits them, run the backend
-**on the NemoClaw server** and turn on **Auto-send critical logs** at the top of the
-Gradio dashboard. Delivery status appears beside the checkbox. Turning it off stops
+Complete critical logs are sent automatically as replay emits them by default. Run
+the backend **on the NemoClaw server**. **Auto-send critical logs** starts checked at
+the top of the Gradio dashboard. Delivery status appears beside it. Turning it off stops
 new sends after the current send finishes and retains pending logs for later.
-The checkbox starts off on a normal launch; to start with it already enabled, use:
+Start normally to enable delivery:
 
 ```bash
-./scripts/start_gradio.sh --auto-send-critical
+./scripts/start_gradio.sh
 ```
 
 This queues each critical replay event durably and calls the bundled NemoClaw sender
 in a background worker, without requiring a review card or manual pipe. Failed sends
-retry after 30 seconds; successful sends are tracked across restarts. The normal local
-startup leaves this delivery path disabled. See
+retry after 30 seconds; successful sends are tracked across restarts. Use
+`./scripts/start_gradio.sh --no-auto-send-critical` to disable it at startup when
+running locally. Missing executables and recognized delivery errors appear in the
+status box. The sender also checks `~/.local/bin/nemoclaw` if it is absent from PATH. See
 [`docs/remote-critical-log-script.md`](docs/remote-critical-log-script.md) for setup,
 delivery semantics, and standalone use with another log generator.
 

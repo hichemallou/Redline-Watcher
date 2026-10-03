@@ -61,7 +61,7 @@ def test_replay_auto_delivery_preserves_payload_and_survives_restart(tmp_path, m
     assert CriticalLogNotifier(database, SENDER).check() == 1
     assert calls[0][1]["input"] == raw
     assert "shell" not in calls[0][1]
-    assert calls[0][0][1:] == [str(SENDER), "--severity", "critical"]
+    assert calls[0][0][1:] == [str(SENDER), "--severity", "critical", "--result-json"]
     assert CriticalLogNotifier(database, SENDER).check() == 0
     assert len(calls) == 1
     assert queue_rows(database)[0]["sent_at"] is not None
@@ -166,3 +166,20 @@ def test_replay_delivers_through_real_sender_to_fake_nemoclaw(tmp_path, monkeypa
         "--message",
         "[CRITICAL] ClawWatch log\n" + raw,
     ]
+
+
+def test_delivery_status_keeps_actionable_error_during_retry_wait(tmp_path, monkeypatch):
+    database, _ = prepare_replay(tmp_path)
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **kw: SimpleNamespace(
+            returncode=1, stderr=json.dumps({"ok": False, "error_code": "executable_missing"})
+        ),
+    )
+    notifier = CriticalLogNotifier(database, SENDER)
+    assert notifier.check() == 0
+    assert "Set NEMOCLAW_BIN" in notifier.status
+    assert "1 awaiting retry" in notifier.status
+    assert notifier.check() == 0
+    assert "Set NEMOCLAW_BIN" in notifier.status

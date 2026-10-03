@@ -10,11 +10,44 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
+
+
+class SendError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _default_binary() -> str:
+    if os.environ.get("NEMOCLAW_BIN"):
+        return os.environ["NEMOCLAW_BIN"]
+    if shutil.which("nemoclaw"):
+        return "nemoclaw"
+    candidate = Path.home() / ".local/bin/nemoclaw"
+    return str(candidate) if os.access(candidate, os.X_OK) else "nemoclaw"
+
+
+def _failure_code(output: str) -> str:
+    """Classify known diagnostics without exposing log or credential text."""
+    output = output.lower()
+    for code, markers in (
+        ("terminal_required", ("not a tty", "not a terminal", "requires a tty")),
+        ("sandbox_not_found", ("sandbox not found", "unknown sandbox", "no sandbox named")),
+        ("slack_auth", ("invalid_auth", "not_authed", "token_revoked")),
+        ("slack_channel", ("channel_not_found", "not_in_channel")),
+        ("slack_scope", ("missing_scope",)),
+        ("gateway_connection", ("connection refused", "failed to connect to gateway")),
+        ("dependency_missing", ("command not found", "no such file or directory")),
+    ):
+        if any(marker in output for marker in markers):
+            return code
+    return "command_failed"
 
 
 def _severity(record: Mapping[str, Any]) -> str:
@@ -78,6 +111,10 @@ def send_record(record: Any, raw_record: str, args: argparse.Namespace) -> str:
 
     environment = os.environ.copy()
     environment["NEMOCLAW_GATEWAY_PORT"] = str(args.gateway_port)
+    # Desktop/services can omit the user-local bin directory from PATH.
+    environment["PATH"] = os.pathsep.join(
+        [environment.get("PATH", os.defpath), str(Path.home() / ".local/bin")]
+    )
     try:
         result = subprocess.run(
             _command(args, message),
@@ -88,13 +125,22 @@ def send_record(record: Any, raw_record: str, args: argparse.Namespace) -> str:
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("NemoClaw send timed out; Slack delivery is unconfirmed") from exc
+        raise SendError(
+            "timeout", "NemoClaw send timed out; Slack delivery is unconfirmed"
+        ) from exc
+    except FileNotFoundError as exc:
+        raise SendError(
+            "executable_missing", "NemoClaw executable was not found; set NEMOCLAW_BIN"
+        ) from exc
+    except PermissionError as exc:
+        raise SendError("permission_denied", "Permission denied launching NemoClaw") from exc
     except OSError as exc:
-        raise RuntimeError(f"could not launch NemoClaw: {exc}") from exc
+        raise SendError("launch_failed", "Could not launch NemoClaw") from exc
 
     if result.returncode:
         # Do not print subprocess output because it can contain log or credential data.
-        raise RuntimeError(f"NemoClaw send failed with exit code {result.returncode}")
+        code = _failure_code(result.stderr + "\n" + result.stdout)
+        raise SendError(code, f"NemoClaw send failed with exit code {result.returncode} ({code})")
     print(json.dumps({"ok": True, "sent": True, "target": args.target}))
     return "sent"
 
@@ -132,11 +178,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target", default="channel:cyber-alerts")
     parser.add_argument(
         "--nemoclaw",
-        default=os.environ.get("NEMOCLAW_BIN", "nemoclaw"),
+        default=_default_binary(),
         help="NemoClaw executable (default: nemoclaw or NEMOCLAW_BIN)",
     )
     parser.add_argument("--timeout", type=float, default=90.0)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--result-json", action="store_true", help="emit structured failure codes")
     return parser
 
 
@@ -151,7 +198,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         outcomes = [send_record(record, raw_record, args) for record, raw_record in _records(args)]
     except (OSError, RuntimeError, ValueError) as exc:
-        print(f"Critical log send failed: {exc}", file=sys.stderr)
+        if args.result_json:
+            print(
+                json.dumps({"ok": False, "error_code": getattr(exc, "code", "invalid_input")}),
+                file=sys.stderr,
+            )
+        else:
+            print(f"Critical log send failed: {exc}", file=sys.stderr)
         return 1
     if outcomes and all(outcome == "skipped" for outcome in outcomes):
         print(json.dumps({"ok": True, "sent": False, "reason": "not-critical"}))

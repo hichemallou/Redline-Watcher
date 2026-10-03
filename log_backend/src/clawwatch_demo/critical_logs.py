@@ -17,6 +17,32 @@ from clawwatch_demo.storage import connect, immediate_transaction
 
 logger = logging.getLogger(__name__)
 
+SEND_ERRORS = {
+    "executable_missing": "NemoClaw executable not found. Set NEMOCLAW_BIN to its absolute path.",
+    "permission_denied": "Permission denied launching NemoClaw; check its executable permissions.",
+    "timeout": "NemoClaw timed out; Slack delivery is unconfirmed.",
+    "launch_failed": "Could not launch NemoClaw.",
+    "terminal_required": "NemoClaw reported that a terminal is required.",
+    "sandbox_not_found": "NemoClaw reported that the sandbox was not found.",
+    "slack_auth": "Slack rejected authentication; check the sandbox Slack credentials.",
+    "slack_channel": "Slack channel is missing or the bot is not a member.",
+    "slack_scope": "Slack reported a missing permission scope.",
+    "gateway_connection": "NemoClaw could not connect to its gateway; check port 8991.",
+    "dependency_missing": "NemoClaw reported a missing executable or file; check its runtime PATH.",
+    "invalid_input": "The sender could not read or parse the queued JSON log.",
+}
+
+
+def _sender_error(result: subprocess.CompletedProcess) -> str:
+    try:
+        detail = json.loads(result.stderr)
+        code = detail.get("error_code") if isinstance(detail, dict) else None
+        if isinstance(code, str) and code in SEND_ERRORS:
+            return SEND_ERRORS[code]
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return f"Sender failed with exit code {result.returncode}; inspect NemoClaw on the server."
+
 
 class CriticalLogNotifier:
     """Run the bundled sender outside replay transactions; retry pending records."""
@@ -55,7 +81,13 @@ class CriticalLogNotifier:
                     error = None
                     try:
                         result = subprocess.run(
-                            [sys.executable, str(self.sender), "--severity", "critical"],
+                            [
+                                sys.executable,
+                                str(self.sender),
+                                "--severity",
+                                "critical",
+                                "--result-json",
+                            ],
                             input=row["original_json"],
                             capture_output=True,
                             text=True,
@@ -63,7 +95,7 @@ class CriticalLogNotifier:
                             check=False,
                         )
                         if result.returncode:
-                            error = f"Sender failed with exit code {result.returncode}"
+                            error = _sender_error(result)
                     except subprocess.TimeoutExpired:
                         error = "Sender timed out; delivery unconfirmed"
                     except OSError:
@@ -106,10 +138,20 @@ class CriticalLogNotifier:
                     "SELECT COUNT(*), COUNT(last_error) FROM critical_log_outbox "
                     "WHERE sent_at IS NULL"
                 ).fetchone()
+                total_sent = connection.execute(
+                    "SELECT COUNT(*) FROM critical_log_outbox WHERE sent_at IS NOT NULL"
+                ).fetchone()[0]
+                last_failure = connection.execute(
+                    "SELECT last_error FROM critical_log_outbox "
+                    "WHERE sent_at IS NULL AND last_error IS NOT NULL "
+                    "ORDER BY next_attempt_at DESC LIMIT 1"
+                ).fetchone()
                 self.status = (
-                    f"Critical logs: {sent} sent this check; {pending[0]} pending "
+                    f"Critical logs: {total_sent} delivered; {pending[0]} pending "
                     f"({pending[1]} awaiting retry)."
                 )
+                if last_failure:
+                    self.status += f" Last error: {last_failure[0]}"
                 return sent
             finally:
                 connection.close()

@@ -30,5 +30,13 @@ def test_serve_passes_remote_delivery_flag(monkeypatch, enabled) -> None:
     args = ["serve", "--config", str(PROJECT_ROOT / "config/demo.toml")]
     if enabled:
         args.append("--auto-send-critical")
+    else:
+        args.append("--no-auto-send-critical")
     assert main(args) == 0
     assert captured == [enabled]
+
+
+def test_serve_enables_delivery_by_default() -> None:
+    from clawwatch_demo.cli import build_parser
+
+    assert build_parser().parse_args(["serve"]).auto_send_critical is True
