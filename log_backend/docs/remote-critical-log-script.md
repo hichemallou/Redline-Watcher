@@ -1,7 +1,7 @@
 # Remote critical-log sender
 
 This script is intended to run on the server that already hosts NemoClaw and
-`redline-watcher-3`. ClawWatch does not connect to the remote server.
+`redline-watcher-6`. ClawWatch does not connect to the remote server.
 
 ## Automatically send logs from replay
 
@@ -59,7 +59,7 @@ install -m 0755 send_critical_log.py "$HOME/.local/bin/send-critical-log"
 The defaults match your current setup:
 
 - NemoClaw gateway port: `8991`
-- Sandbox: `redline-watcher-3`
+- Sandbox: `redline-watcher-6`
 - Slack target: `channel:cyber-alerts`
 
 If `nemoclaw` is not on the noninteractive `PATH`, set its absolute path when
@@ -101,7 +101,7 @@ The script invokes the equivalent of:
 
 ```bash
 export NEMOCLAW_GATEWAY_PORT=8991
-nemoclaw redline-watcher-3 exec -- openclaw message send \
+nemoclaw redline-watcher-6 exec -- openclaw message send \
   --channel slack --target channel:cyber-alerts --message "<complete JSON log>"
 ```
 

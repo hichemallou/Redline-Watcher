@@ -128,7 +128,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="override/inject severity when the input has no severity field",
     )
     parser.add_argument("--gateway-port", type=int, default=8991)
-    parser.add_argument("--sandbox", default="redline-watcher-3")
+    parser.add_argument("--sandbox", default="redline-watcher-6")
     parser.add_argument("--target", default="channel:cyber-alerts")
     parser.add_argument(
         "--nemoclaw",

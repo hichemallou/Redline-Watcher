@@ -153,7 +153,7 @@ def test_replay_delivers_through_real_sender_to_fake_nemoclaw(tmp_path, monkeypa
     captured = json.loads(output.read_text())
     assert captured["port"] == "8991"
     assert captured["args"] == [
-        "redline-watcher-3",
+        "redline-watcher-6",
         "exec",
         "--",
         "openclaw",

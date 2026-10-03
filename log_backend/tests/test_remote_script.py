@@ -36,7 +36,7 @@ def test_critical_record_sends_complete_json_as_one_argument(remote_script, monk
     assert remote_script.main([]) == 0
 
     command = captured["command"]
-    assert command[:4] == ["nemoclaw", "redline-watcher-3", "exec", "--"]
+    assert command[:4] == ["nemoclaw", "redline-watcher-6", "exec", "--"]
     assert command[4:10] == ["openclaw", "message", "send", "--channel", "slack", "--target"]
     assert command[10] == "channel:cyber-alerts"
     message = command[12]
