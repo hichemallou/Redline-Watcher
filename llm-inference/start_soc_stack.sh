@@ -3,15 +3,16 @@
 #  start_soc_stack.sh — starts the whole SOC stack on the Dell Pro Max GB10
 #
 #    1. llama-server (router mode, several models) on 127.0.0.1:8000
-#    2. SOC services (Redis, Postgres, SOC API on :8080) — optional
-#    3. NemoClaw: OpenShell sandbox + OpenClaw agent + Slack channel
-#    4. health checks (model, sandbox, Slack)
+#    2. NemoClaw: OpenShell sandbox + Slack channel
+#    3. OpenClaw agent: version check, SOC instructions, test turn
+#    4. health checks (sandbox, Slack)
 #
 #  Usage:
 #    cp scripts/soc-stack.env.example ~/soc-stack.env   # then fill in the Slack tokens
 #    bash scripts/start_soc_stack.sh                    # start everything
-#    bash scripts/start_soc_stack.sh stop               # stop llama-server, services and sandbox
+#    bash scripts/start_soc_stack.sh stop               # stop llama-server and the sandbox
 #    bash scripts/start_soc_stack.sh status             # show stack status
+#    bash scripts/start_soc_stack.sh analyze [log]      # one OpenClaw analysis, result posted to Slack
 #
 #  References: NemoClaw docs (inference/set-up-openai-compatible-endpoint,
 #  manage-sandboxes/set-up-slack, reference/commands) shipped in 01_nemoclaw/.
@@ -26,12 +27,13 @@ ENV_FILE="${SOC_ENV_FILE:-$HOME/soc-stack.env}"
 # (every value below can be overridden in ~/soc-stack.env)
 MODELS_DIR="${MODELS_DIR:-/home/dell/hktn}"                 # folder holding the GGUF files
 LLAMA_SERVER="${LLAMA_SERVER:-$(command -v llama-server || echo "$HOME/llama.cpp/build/bin/llama-server")}"
-LLAMA_PORT="${LLAMA_PORT:-8000}"                            # 8000 = no-auth port supported by NemoClaw
+LLAMA_PORT="${LLAMA_PORT:-8000}"                            # LLM server port (any free port except 11435; 127.0.0.1 only)
+DASHBOARD_PORT="${DASHBOARD_PORT:-18789}"                   # OpenClaw web dashboard port (1024-65535)
+# NEMOCLAW_GATEWAY_PORT=…                                   # optional: OpenShell gateway port (set only if the default is taken)
 AGENT_MODEL="${AGENT_MODEL:-Qwen3.8-27B}"                   # model that drives the agent (must handle tool calling)
 SANDBOX_NAME="${SANDBOX_NAME:-soc-agent}"
 POLICY_TIER="${POLICY_TIER:-balanced}"                      # restricted | balanced | open
 LOGS_DIR="${LOGS_DIR:-/var/log}"                            # mounted read-only at /sandbox/logs
-START_SOC_API="${START_SOC_API:-1}"                         # 1 = start Redis/Postgres/SOC API
 RUN_DIR="${RUN_DIR:-$HOME/.soc-stack}"
 # Slack (Socket Mode): SLACK_BOT_TOKEN (xoxb-…), SLACK_APP_TOKEN (xapp-…),
 #                      SLACK_ALLOWED_USERS, SLACK_ALLOWED_CHANNELS (comma-separated IDs)
@@ -58,7 +60,20 @@ fa = on
 reasoning = on
 sleep-idle-seconds = 600
 
-
+[NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF]
+model = $MODELS_DIR/Nemotron-3.5-Lightning/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-Q4_K_XL.gguf
+n-gpu-layers = 99
+temp = 0.6
+top-p = 0.95
+min-p = 0.01
+ctx-size = 262144
+cache-type-k = q4_0
+cache-type-v = q4_0
+kv-unified = true
+fa = on
+reasoning = on
+sleep-idle-seconds = 600
+chat-template-kwargs = {"preserve_thinking": true}
 
 [CyberPal2.0-20B]
 model = $MODELS_DIR/CyberPal2.0-20B/gguf/CyberPal2.0-20B.MXFP4_MOE.gguf
@@ -88,6 +103,15 @@ PY
 }
 
 # ------------------------------ llama-server ---------------------------------
+check_ports() {
+  [ "$LLAMA_PORT" = 11435 ] && die "LLAMA_PORT 11435 is reserved by NemoClaw's proxy"
+  for p in "$DASHBOARD_PORT"; do
+    if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$p$"; then
+      warn "port $p is already in use (fine if it is this stack running already)"
+    fi
+  done
+}
+
 start_llama() {
   say "1/4  llama-server (router) on 127.0.0.1:$LLAMA_PORT"
   [ -x "$LLAMA_SERVER" ] || die "llama-server not found ($LLAMA_SERVER). Set LLAMA_SERVER in $ENV_FILE"
@@ -116,17 +140,9 @@ start_llama() {
     >/dev/null && echo "   generation OK" || warn "test generation failed (see $RUN_DIR/llama-server.log)"
 }
 
-# ------------------------------- SOC services --------------------------------
-start_soc_services() {
-  [ "$START_SOC_API" = 1 ] || return 0
-  say "2/4  SOC services (Redis, Postgres, SOC API :8080)"
-  ( cd "$KIT" && docker compose -f 10_soc_api/docker-compose.yml up -d --build ) \
-    || warn "SOC API not started (the agent still works without it)"
-}
-
 # -------------------------------- NemoClaw -----------------------------------
 start_nemoclaw() {
-  say "3/4  NemoClaw: sandbox '$SANDBOX_NAME' (OpenShell + OpenClaw + Slack)"
+  say "2/4  NemoClaw: sandbox '$SANDBOX_NAME' (OpenShell + OpenClaw + Slack)"
   command -v nemoclaw >/dev/null || die "nemoclaw not found: run  bash 01_nemoclaw/nemoclaw.sh  first"
   command -v docker  >/dev/null || die "docker not found"
 
@@ -155,7 +171,53 @@ start_nemoclaw() {
   NEMOCLAW_COMPATIBLE_AUTH_MODE=none \
   NEMOCLAW_VLLM_PORT="$LLAMA_PORT" \
   NEMOCLAW_POLICY_TIER="$POLICY_TIER" \
-    nemoclaw onboard --non-interactive --yes-i-accept-third-party-software "${MOUNTS[@]}"
+    nemoclaw onboard --non-interactive --yes-i-accept-third-party-software --control-ui-port "$DASHBOARD_PORT" "${MOUNTS[@]}"
+}
+
+# -------------------------------- OpenClaw -----------------------------------
+# OpenClaw runs INSIDE the OpenShell sandbox created by NemoClaw (NEMOCLAW_AGENT=openclaw).
+# It is not a separate host process: you reach it through `nemoclaw <sandbox> exec|agent|launch`.
+SOC_PROMPT='You are the SOC analyst agent. Security logs are mounted read-only in /sandbox/logs and the MITRE ATT&CK index is in /sandbox/mitre/techniques_index.json.
+For every analysis:
+1. Read only the relevant log lines (filter first, never load whole files).
+2. Decide whether the activity is an attack (true/false).
+3. Give a severity: low, medium, high or critical. Low = recon or a single failed attempt. Medium = repeated attempts, no success. High = successful access or execution on one host. Critical = credential theft, ransomware or lateral spread.
+4. List MITRE ATT&CK technique IDs and check each one exists in /sandbox/mitre/techniques_index.json.
+5. Quote the evidence log lines you used.
+6. Give remediation steps in three groups: contain, eradicate, prevent.
+Answer in English. Start with one line: "<SEVERITY> | <short title>". Never claim an action was executed: you only recommend, the analyst approves.'
+
+setup_openclaw() {
+  say "3/4  OpenClaw agent (inside sandbox '$SANDBOX_NAME')"
+  echo -n "   OpenClaw version: "
+  nemoclaw "$SANDBOX_NAME" exec -- openclaw --version 2>/dev/null || warn "could not read the OpenClaw version"
+
+  # SOC instructions: written to the agent workspace and referenced from AGENTS.md
+  printf '%s\n' "# SOC analyst role" "" "$SOC_PROMPT" > "$RUN_DIR/SOC_ANALYST.md"
+  nemoclaw "$SANDBOX_NAME" upload "$RUN_DIR/SOC_ANALYST.md" /sandbox/.openclaw/workspace/SOC_ANALYST.md \
+    && nemoclaw "$SANDBOX_NAME" exec --workdir /sandbox/.openclaw/workspace -- sh -c \
+       'grep -q SOC_ANALYST.md AGENTS.md 2>/dev/null || printf "\n## SOC role\nRead and follow SOC_ANALYST.md for every security analysis.\n" >> AGENTS.md' \
+    && echo "   SOC instructions installed (workspace/SOC_ANALYST.md)" \
+    || warn "could not install SOC instructions"
+
+  echo "   test turn through OpenClaw → $AGENT_MODEL …"
+  nemoclaw "$SANDBOX_NAME" agent --agent main -m "Reply with exactly: OPENCLAW OK" --timeout 300 \
+    | tail -3 || warn "OpenClaw test turn failed: nemoclaw $SANDBOX_NAME logs"
+}
+
+# One-shot analysis: OpenClaw reads a log file and delivers its report to Slack.
+# Check the --to format for Slack with:  nemoclaw <sandbox> exec -- openclaw agent --help
+analyze() {
+  local log="${1:-auth.log}"
+  local to="${SLACK_DELIVER_TO:-${SLACK_ALLOWED_CHANNELS%%,*}}"
+  local msg="Analyze /sandbox/logs/$log for the last hour following SOC_ANALYST.md. Is it an attack? Severity, ATT&CK IDs, evidence lines, remediation."
+  say "OpenClaw analysis of /sandbox/logs/$log"
+  if [ -n "$to" ]; then
+    nemoclaw "$SANDBOX_NAME" agent --agent main -m "$msg" --deliver --reply-channel slack --to "$to" --timeout 600
+  else
+    warn "no Slack channel set: printing the report here only"
+    nemoclaw "$SANDBOX_NAME" agent --agent main -m "$msg" --timeout 600
+  fi
 }
 
 # --------------------------------- checks ------------------------------------
@@ -170,11 +232,12 @@ check_all() {
   cat <<EOF
 
 $(printf '\033[1;32m')Stack is up.$(printf '\033[0m')
-  Chat with the agent : nemoclaw launch $SANDBOX_NAME
+  OpenClaw chat (TUI) : nemoclaw launch $SANDBOX_NAME
+  OpenClaw one turn   : nemoclaw $SANDBOX_NAME agent --agent main -m "..."
+  Analysis → Slack    : bash scripts/start_soc_stack.sh analyze auth.log
   Shell in sandbox    : nemoclaw $SANDBOX_NAME connect
-  Dashboard           : port 18789 (URL printed by onboarding)
+  Dashboard           : port $DASHBOARD_PORT  (full URL: nemoclaw $SANDBOX_NAME dashboard-url)
   Models (local)      : http://127.0.0.1:$LLAMA_PORT/v1/models
-  SOC API             : http://127.0.0.1:8080/health
   llama-server logs   : $RUN_DIR/llama-server.log
 
   Slack test: in the allowed channel, post
@@ -187,14 +250,14 @@ stop_all() {
   say "Stopping"
   [ -f "$RUN_DIR/llama-server.pid" ] && kill "$(cat "$RUN_DIR/llama-server.pid")" 2>/dev/null && echo "   llama-server stopped"
   rm -f "$RUN_DIR/llama-server.pid"
-  ( cd "$KIT" && docker compose -f 10_soc_api/docker-compose.yml down ) 2>/dev/null || true
   nemoclaw "$SANDBOX_NAME" stop 2>/dev/null || true
 }
 
 case "${1:-start}" in
-  start)  start_llama; start_soc_services; start_nemoclaw; check_all ;;
+  start)  check_ports; start_llama; start_nemoclaw; setup_openclaw; check_all ;;
+  analyze) analyze "${2:-auth.log}" ;;
   stop)   stop_all ;;
   status) curl -sf "http://127.0.0.1:$LLAMA_PORT/health" && echo " llama-server OK" || echo "llama-server KO"
           nemoclaw "$SANDBOX_NAME" status || true ;;
-  *) echo "usage: $0 [start|stop|status]"; exit 1 ;;
+  *) echo "usage: $0 [start|stop|status|analyze [logfile]]"; exit 1 ;;
 esac
