@@ -1,0 +1,4 @@
+{"event_id":"evt-1","timestamp":"2025-01-01T00:00:00","event_type":"auth","source":"Test SIEM v1","severity":"medium","raw_log":"Auth failed","advanced_metadata":{},"user":"demo-user","action":"failed","src_ip":"N/A","description":"Authentication failed"}
+{"event_id":"evt-2","timestamp":"2025-01-01T00:00:01+00:00","event_type":"endpoint","source":"Test SIEM v1","severity":"high","raw_log":"Process start","advanced_metadata":{},"user":null,"action":"process_start","description":"Endpoint process started"}
+{"event_id":"broken"
+{"event_id":"evt-1","timestamp":"2025-01-01T00:00:02","event_type":"auth","source":"Test SIEM v1","severity":"low","raw_log":"Auth success","advanced_metadata":{},"user":"demo-user","action":"success","src_ip":"192.0.2.10","description":"Duplicate identifier"}

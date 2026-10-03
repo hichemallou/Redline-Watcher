@@ -1,0 +1,25 @@
+[data]
+source = "data/advanced_siem/raw/advanced_siem_dataset.jsonl"
+repository = "darkknight25/Advanced_SIEM_Dataset"
+revision = "72201c8d533f72039850ff0250e68a039283440d"
+sha256 = "b30902649de9197376e7b245045c6f6721ba3039edc1b7cac3474cc2ad0c4f21"
+
+[storage]
+database = "var/clawwatch_demo.sqlite3"
+
+[importer]
+batch_size = 10000
+progress_every = 10000
+
+[server]
+host = "127.0.0.1"
+port = 7860
+share = false
+
+[replay]
+default_preset = "all"
+default_limit = 1000
+default_rate = 10.0
+available_rates = [1.0, 5.0, 10.0, 25.0, 50.0, 100.0]
+refresh_seconds = 1.0
+display_timezone = "America/New_York"
