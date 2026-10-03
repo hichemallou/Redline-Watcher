@@ -75,7 +75,7 @@ def create_app(
     recovered = recover_interrupted_runs(config.storage.database) if recover else ()
     controller = ReplayController(config.storage.database, auto_send_critical=auto_send_critical)
     critical_log_notifier = CriticalLogNotifier(
-        config.storage.database, config.project_root / "scripts/remote/send_critical_log.py"
+        config.storage.database, config.project_root / "scripts/send_critical_log.py"
     )
     if not auto_send_critical:
         critical_log_notifier.status = "Critical logs: automatic sending disabled."
@@ -162,7 +162,7 @@ def create_app(
         gr.HTML(header_html(str(config.storage.database)))
         with gr.Row():
             critical_auto_send = gr.Checkbox(
-                label="Auto-send critical logs (NemoClaw server only)",
+                label="Auto-send critical logs",
                 value=auto_send_critical,
                 info=(
                     "Sends complete logs to cyber-alerts during replay. "

@@ -13,7 +13,7 @@ from clawwatch_demo.critical_logs import CriticalLogNotifier
 from clawwatch_demo.replay import ReplayController
 from clawwatch_demo.storage import connect
 
-SENDER = Path(__file__).resolve().parents[1] / "scripts/remote/send_critical_log.py"
+SENDER = Path(__file__).resolve().parents[1] / "scripts/send_critical_log.py"
 
 
 def prepare_replay(tmp_path, *, enabled=True):

@@ -10,7 +10,7 @@ import pytest
 
 @pytest.fixture
 def remote_script(monkeypatch):
-    path = Path(__file__).resolve().parents[1] / "scripts/remote/send_critical_log.py"
+    path = Path(__file__).resolve().parents[1] / "scripts/send_critical_log.py"
     spec = importlib.util.spec_from_file_location("remote_critical_log", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

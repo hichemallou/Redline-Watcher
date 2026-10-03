@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Send complete critical log records through the local NemoClaw sandbox.
 
-Install and run this script on the remote server that hosts NemoClaw. It never
-connects to that server from the ClawWatch machine.
+Run on the same host as Gradio and NemoClaw. No SSH or remote-host configuration
+is required.
 """
 
 from __future__ import annotations

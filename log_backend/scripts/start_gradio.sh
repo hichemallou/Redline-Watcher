@@ -13,7 +13,7 @@ Usage: ./scripts/start_gradio.sh [--config PATH] [--no-auto-send-critical]
 Start the ClawWatch Gradio dashboard in the foreground. The default configuration
 is config/demo.toml. Stop the server with Ctrl+C.
 Critical replay logs are sent automatically through NemoClaw on this host by default.
-Use --no-auto-send-critical to start with sending disabled (for example, locally).
+Use --no-auto-send-critical to start with sending disabled.
 EOF
 }
 

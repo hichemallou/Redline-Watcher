@@ -1,11 +1,11 @@
-# Remote critical-log sender
+# Critical-log sender
 
-This script is intended to run on the server that already hosts NemoClaw and
-`redline-watcher-6`. ClawWatch does not connect to the remote server.
+Gradio calls NemoClaw directly on this host, using `redline-watcher-6` and gateway
+port `8991`. No SSH, remote address, username, or separate server setup is required.
 
 ## Automatically send logs from replay
 
-Run `log_backend` on the NemoClaw server. **Auto-send critical logs** is enabled by
+Run `log_backend` alongside NemoClaw. **Auto-send critical logs** is enabled by
 default at the top of the Gradio dashboard. The adjacent status shows total delivered,
 pending/retry counts, and the latest pending error.
 Turning it off waits for any current send and retains pending logs; turning it back
@@ -21,10 +21,10 @@ cd log_backend
 
 Equivalent CLI: `.venv/bin/clawwatch-demo serve --config config/demo.toml`.
 Start a replay in the dashboard. Every newly emitted critical event is automatically
-queued and sent through the bundled `scripts/remote/send_critical_log.py`; no manual
+queued and sent through the bundled `scripts/send_critical_log.py`; no manual
 pipe or review card is required. The complete original JSON is passed through stdin.
-Use `--no-auto-send-critical` to disable delivery at startup, for example when running
-locally. `--auto-send-critical` remains supported as an explicit enable flag.
+Use `--no-auto-send-critical` to disable delivery at startup.
+`--auto-send-critical` remains supported as an explicit enable flag.
 
 The server checks the queue every second, including while the browser is closed.
 Sending runs separately from replay and never holds a database write transaction.
@@ -49,15 +49,16 @@ Shutdown waits for the current send to finish (up to its timeout). A crash or ti
 after Slack accepts a message but before delivery is recorded can cause a duplicate
 on retry; delivery is not exactly-once.
 
-## Install it on the remote server
+## Optional standalone installation
 
 For a different log generator, the standalone script can still be installed separately.
 
-Copy [`scripts/remote/send_critical_log.py`](../scripts/remote/send_critical_log.py)
-to the remote host and make it executable:
+From `log_backend`, install [`scripts/send_critical_log.py`](../scripts/send_critical_log.py)
+as a command on this host:
 
 ```bash
-install -m 0755 send_critical_log.py "$HOME/.local/bin/send-critical-log"
+mkdir -p "$HOME/.local/bin"
+install -m 0755 scripts/send_critical_log.py "$HOME/.local/bin/send-critical-log"
 ```
 
 The defaults match your current setup:
@@ -111,5 +112,5 @@ nemoclaw redline-watcher-6 exec -- openclaw message send \
 
 It passes arguments directly to the process without a shell, so quotes,
 newlines, backticks, and `$()` inside log data cannot execute commands. A failure
-returns a nonzero exit status without printing the remote command output. The
+returns a nonzero exit status without printing the command output. The
 caller should retry failed records and preserve them until the command succeeds.

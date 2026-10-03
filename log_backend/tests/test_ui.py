@@ -101,7 +101,7 @@ def test_gradio_app_builds_with_packaged_css(tmp_path: Path) -> None:
         assert runtime.critical_log_notifier._thread is None
         assert runtime.controller.auto_send_critical is False
         assert any(
-            component["props"].get("label") == "Auto-send critical logs (NemoClaw server only)"
+            component["props"].get("label") == "Auto-send critical logs"
             and component["props"].get("value") is False
             for component in serialized["components"]
         )
@@ -145,7 +145,7 @@ def test_gradio_toggle_starts_and_stops_delivery(tmp_path: Path, monkeypatch) ->
 
     database = make_database(tmp_path, event_count=2)
     controller = ReplayController(database)
-    notifier = CriticalLogNotifier(database, PROJECT_ROOT / "scripts/remote/send_critical_log.py")
+    notifier = CriticalLogNotifier(database, PROJECT_ROOT / "scripts/send_critical_log.py")
     calls = []
     monkeypatch.setattr(notifier, "start", lambda: calls.append("start"))
     monkeypatch.setattr(notifier, "close", lambda: calls.append("close"))

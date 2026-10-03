@@ -53,13 +53,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--auto-send-critical",
         action="store_true",
         default=True,
-        help="send critical replay logs automatically (default); run on the NemoClaw server",
+        help="send critical replay logs through NemoClaw on this host (default)",
     )
     delivery_options.add_argument(
         "--no-auto-send-critical",
         action="store_false",
         dest="auto_send_critical",
-        help="disable automatic NemoClaw delivery, for example when running locally",
+        help="disable automatic NemoClaw delivery",
     )
 
     info_parser = subparsers.add_parser("db-info", help="show local database information")
