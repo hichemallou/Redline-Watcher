@@ -8,16 +8,21 @@ DEFAULT_CONFIG="${PROJECT_ROOT}/config/demo.toml"
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/start_gradio.sh [--config PATH]
+Usage: ./scripts/start_gradio.sh [--config PATH] [--auto-send-critical]
 
 Start the ClawWatch Gradio dashboard in the foreground. The default configuration
 is config/demo.toml. Stop the server with Ctrl+C.
+On the NemoClaw server, --auto-send-critical sends critical replay logs automatically.
 EOF
 }
 
 CONFIG_PATH="${DEFAULT_CONFIG}"
+EXTRA_ARGS=()
 while (($#)); do
   case "$1" in
+    --auto-send-critical)
+      EXTRA_ARGS+=(--auto-send-critical)
+      ;;
     --config)
       if (($# < 2)); then
         echo "--config requires a path" >&2
@@ -54,4 +59,4 @@ fi
 
 cd "${PROJECT_ROOT}"
 echo "Starting ClawWatch from ${CONFIG_PATH}"
-exec "${APP}" serve --config "${CONFIG_PATH}"
+exec "${APP}" serve --config "${CONFIG_PATH}" "${EXTRA_ARGS[@]}"

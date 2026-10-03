@@ -222,7 +222,9 @@ def _complete_run(connection: sqlite3.Connection, run: ReplayRun, now: str) -> N
     _record_activity(connection, run.id, "completed", "running", "completed", now)
 
 
-def _emit_next(connection: sqlite3.Connection, run_id: int, clock: Clock) -> bool:
+def _emit_next(
+    connection: sqlite3.Connection, run_id: int, clock: Clock, *, auto_send_critical: bool = False
+) -> bool:
     """Commit the next selected event and replay cursor together."""
     with immediate_transaction(connection):
         run = _get_run(connection, run_id)
@@ -266,7 +268,7 @@ def _emit_next(connection: sqlite3.Connection, run_id: int, clock: Clock) -> boo
                 parameters.append(int(previous["line_number"]))
         source = connection.execute(
             f"""
-            SELECT id
+            SELECT id, severity
             FROM source_events
             WHERE {predicate}
             ORDER BY {ordering}
@@ -281,7 +283,7 @@ def _emit_next(connection: sqlite3.Connection, run_id: int, clock: Clock) -> boo
         sequence = run.committed_selection_cursor + 1
         simulated_at = _utc_text(clock)
         emitted_at = _utc_text(clock)
-        connection.execute(
+        emitted = connection.execute(
             """
             INSERT INTO replay_events(
                 run_id, sequence, source_event_id, simulated_at, emitted_at
@@ -289,6 +291,11 @@ def _emit_next(connection: sqlite3.Connection, run_id: int, clock: Clock) -> boo
             """,
             (run.id, sequence, int(source["id"]), simulated_at, emitted_at),
         )
+        if auto_send_critical and str(source["severity"]).strip().lower() == "critical":
+            connection.execute(
+                "INSERT INTO critical_log_outbox(replay_event_id) VALUES (?)",
+                (emitted.lastrowid,),
+            )
         connection.execute(
             """
             UPDATE replay_runs
@@ -304,8 +311,11 @@ def _emit_next(connection: sqlite3.Connection, run_id: int, clock: Clock) -> boo
 class ReplayController:
     """Own the single replay worker and expose acknowledged lifecycle controls."""
 
-    def __init__(self, database: Path, *, clock: Clock | None = None) -> None:
+    def __init__(
+        self, database: Path, *, clock: Clock | None = None, auto_send_critical: bool = False
+    ) -> None:
         self.database = database.resolve()
+        self.auto_send_critical = auto_send_critical
         self.clock = clock or SystemClock()
         migrate(self.database)
         self._condition = threading.Condition()
@@ -671,7 +681,9 @@ class ReplayController:
                     self._wake.clear()
                     continue
 
-                emitted = _emit_next(connection, run_id, self.clock)
+                emitted = _emit_next(
+                    connection, run_id, self.clock, auto_send_critical=self.auto_send_critical
+                )
                 if not emitted:
                     with self._condition:
                         self._condition.notify_all()

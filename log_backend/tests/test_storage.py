@@ -7,8 +7,8 @@ from clawwatch_demo.storage import database_summary, migrate
 def test_migration_creates_versioned_schema(tmp_path: Path) -> None:
     database = tmp_path / "demo.sqlite3"
 
-    assert migrate(database) == 2
-    assert migrate(database) == 2
+    assert migrate(database) == 3
+    assert migrate(database) == 3
 
     connection = sqlite3.connect(database)
     try:
@@ -28,11 +28,12 @@ def test_migration_creates_versioned_schema(tmp_path: Path) -> None:
         "replay_events",
         "review_cards",
         "activity_log",
+        "critical_log_outbox",
     } <= tables
     assert journal_mode == "wal"
 
     summary = database_summary(database)
-    assert summary["schema_version"] == 2
+    assert summary["schema_version"] == 3
     assert summary["source_event_count"] == 0
 
 

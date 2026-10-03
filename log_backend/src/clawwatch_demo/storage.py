@@ -12,6 +12,7 @@ from typing import Any
 MIGRATIONS: tuple[tuple[int, str], ...] = (
     (1, "001_initial.sql"),
     (2, "002_single_active_replay.sql"),
+    (3, "003_critical_log_outbox.sql"),
 )
 
 

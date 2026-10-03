@@ -13,6 +13,7 @@ from typing import Any
 import gradio as gr
 
 from clawwatch_demo.config import AppConfig
+from clawwatch_demo.critical_logs import CriticalLogNotifier
 from clawwatch_demo.monitoring import filter_options, list_runs
 from clawwatch_demo.replay import ReplayController, recover_interrupted_runs
 from clawwatch_demo.review import REVIEW_STAGES
@@ -25,9 +26,29 @@ from clawwatch_demo.ui.render import board_html, header_html, notice_html
 class DashboardRuntime:
     controller: ReplayController
     slack_notifier: ReviewSlackNotifier
+    critical_log_notifier: CriticalLogNotifier
     recovered_run_ids: tuple[int, ...]
     theme: Any
     css: str
+
+
+def set_critical_delivery(
+    enabled: bool, controller: ReplayController, notifier: CriticalLogNotifier
+) -> tuple[bool, str]:
+    """Toggle replay delivery from Gradio without changing replay state."""
+    if enabled:
+        try:
+            notifier.start()
+        except (OSError, RuntimeError) as exc:
+            controller.auto_send_critical = False
+            notifier.status = f"Critical logs: could not enable automatic sending: {exc}"
+            return False, notifier.status
+        controller.auto_send_critical = True
+    else:
+        controller.auto_send_critical = False
+        notifier.close()
+        notifier.status = "Critical logs: automatic sending disabled; pending logs are retained."
+    return enabled, notifier.status
 
 
 @contextmanager
@@ -49,9 +70,15 @@ def create_app(
     config: AppConfig,
     *,
     recover: bool = True,
+    auto_send_critical: bool = False,
 ) -> tuple[gr.Blocks, DashboardRuntime]:
     recovered = recover_interrupted_runs(config.storage.database) if recover else ()
-    controller = ReplayController(config.storage.database)
+    controller = ReplayController(config.storage.database, auto_send_critical=auto_send_critical)
+    critical_log_notifier = CriticalLogNotifier(
+        config.storage.database, config.project_root / "scripts/remote/send_critical_log.py"
+    )
+    if not auto_send_critical:
+        critical_log_notifier.status = "Critical logs: automatic sending disabled."
     slack_notifier = ReviewSlackNotifier(config.storage.database, config.project_root / ".env")
     callbacks = DashboardCallbacks(config.storage.database, controller, slack_notifier)
     event_types, severities = filter_options(config.storage.database)
@@ -133,6 +160,34 @@ def create_app(
         refresh_timer = gr.Timer(config.replay.refresh_seconds, active=True)
 
         gr.HTML(header_html(str(config.storage.database)))
+        with gr.Row():
+            critical_auto_send = gr.Checkbox(
+                label="Auto-send critical logs (NemoClaw server only)",
+                value=auto_send_critical,
+                info=(
+                    "Sends complete logs to cyber-alerts during replay. "
+                    "Pending logs retry automatically."
+                ),
+            )
+            critical_log_status = gr.Textbox(
+                label="Automatic critical-log delivery",
+                value=critical_log_notifier.status,
+                interactive=False,
+            )
+        critical_auto_send.input(
+            lambda enabled: set_critical_delivery(enabled, controller, critical_log_notifier),
+            inputs=critical_auto_send,
+            outputs=[critical_auto_send, critical_log_status],
+            concurrency_limit=1,
+            concurrency_id="critical-log-delivery",
+        )
+        refresh_timer.tick(
+            lambda: (controller.auto_send_critical, critical_log_notifier.status),
+            outputs=[critical_auto_send, critical_log_status],
+            concurrency_limit=1,
+            concurrency_id="critical-log-delivery",
+            show_progress="hidden",
+        )
         status = gr.HTML()
 
         with gr.Group(elem_id="cw-controls"):
@@ -501,16 +556,19 @@ def create_app(
     return demo, DashboardRuntime(
         controller=controller,
         slack_notifier=slack_notifier,
+        critical_log_notifier=critical_log_notifier,
         recovered_run_ids=recovered,
         theme=theme,
         css=css,
     )
 
 
-def launch_dashboard(config: AppConfig) -> int:
+def launch_dashboard(config: AppConfig, *, auto_send_critical: bool = False) -> int:
     with application_lock(config.storage.database):
-        demo, runtime = create_app(config)
+        demo, runtime = create_app(config, auto_send_critical=auto_send_critical)
         try:
+            if auto_send_critical:
+                runtime.critical_log_notifier.start()
             runtime.slack_notifier.start()
             demo.queue(default_concurrency_limit=4).launch(
                 server_name=config.server.host,
@@ -523,6 +581,7 @@ def launch_dashboard(config: AppConfig) -> int:
                 css=runtime.css,
             )
         finally:
-            runtime.slack_notifier.close()
             runtime.controller.close()
+            runtime.critical_log_notifier.close()
+            runtime.slack_notifier.close()
     return 0

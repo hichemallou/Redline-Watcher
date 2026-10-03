@@ -48,6 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     serve_parser = subparsers.add_parser("serve", help="launch the local Gradio dashboard")
     _add_config_argument(serve_parser)
+    serve_parser.add_argument(
+        "--auto-send-critical",
+        action="store_true",
+        help="automatically send critical replay logs; run only on the NemoClaw server",
+    )
 
     info_parser = subparsers.add_parser("db-info", help="show local database information")
     _add_config_argument(info_parser)
@@ -134,7 +139,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         from clawwatch_demo.ui.app import launch_dashboard
 
         try:
-            return launch_dashboard(config)
+            return launch_dashboard(config, auto_send_critical=args.auto_send_critical)
         except (OSError, RuntimeError, sqlite3.Error) as exc:
             print(f"Dashboard failed: {exc}", file=sys.stderr)
             return 1
